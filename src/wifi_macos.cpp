@@ -70,10 +70,10 @@ public:
       ~MacOSWifiImpl() {
         // CoreFoundation objects are reference counted and will be released automatically
     }
-    
-    std::vector<NetworkInfo> scan() override {
+      std::vector<NetworkInfo> scan() override {
         std::vector<NetworkInfo> networks;
         Logger::getInstance().info("Scanning for networks on macOS interface " + interfaceName);
+        Logger::getInstance().info("Note: On macOS, network SSID and BSSID information may be limited unless Location Services is enabled and authorized");
         
         NSError* error = nil;
         NSSet<CWNetwork*>* scanResults = [wifiInterface scanForNetworksWithName:nil error:&error];
@@ -83,16 +83,17 @@ public:
                                        (error ? NSStringToStdString([error localizedDescription]) : "Unknown error"));
             return networks;
         }
-        
-        // Convert scan results to NetworkInfo objects
+          // Convert scan results to NetworkInfo objects
         for (CWNetwork* network in scanResults) {
             NetworkInfo info;
             
-            // Get SSID
-            info.ssid = NSStringToStdString([network ssid]);
+            // Get SSID - may be nil if Location Services is not enabled/authorized
+            NSString* ssidValue = [network ssid];
+            info.ssid = ssidValue ? NSStringToStdString(ssidValue) : "[Hidden Network]";
             
-            // Get BSSID
-            info.bssid = NSStringToStdString([network bssid]);
+            // Get BSSID - may be nil if Location Services is not enabled/authorized
+            NSString* bssidValue = [network bssid];
+            info.bssid = bssidValue ? NSStringToStdString(bssidValue) : "[No Access]";
             
             // Get signal strength
             info.signalStrength = static_cast<int>([network rssiValue]);
@@ -244,6 +245,14 @@ private:
     CWWiFiClient* wifiClient = nullptr;
     CWInterface* wifiInterface = nullptr;
     std::string interfaceName;
+    
+    // Helper method to check if Location Services is enabled and authorized
+    // Note: This requires importing CoreLocation framework for a complete implementation
+    bool isLocationServicesAuthorized() const {
+        // This is a placeholder - real implementation would use CoreLocation
+        // and check CLAuthorizationStatus
+        return false;
+    }
     
     // Helper method to check if an interface has an IP address
     bool hasIpAddress(const std::string& interface_name) const {

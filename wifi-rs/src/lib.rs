@@ -83,21 +83,22 @@ impl WiFi {
             let raw_slice = std::slice::from_raw_parts(raw_networks, count as usize);
             let result = raw_slice
                 .iter()
-                .map(|raw| {
-                    let ssid = if raw.ssid.is_null() {
-                        String::new()
+                .map(|raw| {                    let ssid = if raw.ssid.is_null() {
+                        "[Hidden Network]".to_string()
                     } else {
-                        std::ffi::CStr::from_ptr(raw.ssid)
+                        let s = std::ffi::CStr::from_ptr(raw.ssid)
                             .to_string_lossy()
-                            .into_owned()
+                            .into_owned();
+                        if s.is_empty() { "[Hidden Network]".to_string() } else { s }
                     };
                     
                     let bssid = if raw.bssid.is_null() {
-                        String::new()
+                        "[No Access]".to_string()
                     } else {
-                        std::ffi::CStr::from_ptr(raw.bssid)
+                        let s = std::ffi::CStr::from_ptr(raw.bssid)
                             .to_string_lossy()
-                            .into_owned()
+                            .into_owned();
+                        if s.is_empty() { "[No Access]".to_string() } else { s }
                     };
                     
                     NetworkInfo {

@@ -1,9 +1,10 @@
 use wifi_rs::{WiFi, SecurityType};
 
-fn main() {
-    let wifi = WiFi::new();
+fn main() {    let wifi = WiFi::new();
     
     println!("Scanning for WiFi networks...");
+    #[cfg(target_os = "macos")]
+    println!("Note: On macOS, network SSID and BSSID information may be limited unless Location Services is enabled and authorized");
     let networks = wifi.scan();
     println!("Found {} networks", networks.len());
     
