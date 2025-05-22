@@ -12,8 +12,7 @@ A comprehensive WiFi management library written in C++ with bindings for Rust, p
   - Android (using JNI bridge to Android WiFi API)
   - RTOS (ESP32, Zephyr, FreeRTOS, ThreadX)
 
-- **Core Functionality**:
-  - Network scanning with detailed information
+- **Core Functionality**:  - Network scanning with detailed information
   - Connection management (connect/disconnect)
   - Connection status monitoring
   - Hotspot creation and management
@@ -23,6 +22,17 @@ A comprehensive WiFi management library written in C++ with bindings for Rust, p
   - Native C++ API
   - C API for FFI compatibility
   - Rust bindings
+
+## Platform-Specific Notes
+
+### macOS
+On macOS 10.15 (Catalina) and newer, Apple requires Location Services permissions to access WiFi network SSID and BSSID information. This is a privacy measure implemented by Apple. See [readme_macos.md](readme_macos.md) for detailed setup instructions.
+
+### Windows
+Requires administrator privileges for some operations like hotspot creation.
+
+### Linux
+Requires NetworkManager or equivalent, with proper permissions to control WiFi.
 
 ## Architecture
 

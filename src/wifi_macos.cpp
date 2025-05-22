@@ -13,12 +13,64 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreWLAN/CoreWLAN.h>
 #include <SystemConfiguration/SystemConfiguration.h>
+#include <CoreLocation/CoreLocation.h>
+#include <AppKit/AppKit.h>
 #include <net/if.h>
 #include <ifaddrs.h>
+#include <dispatch/dispatch.h>
+
+// Helper interface for Location Services delegate
+@interface LocationDelegate : NSObject <CLLocationManagerDelegate>
+@property (nonatomic, strong) dispatch_semaphore_t authSemaphore;
+@property (nonatomic, assign) BOOL isAuthorized;
+@property (nonatomic, strong) dispatch_group_t initGroup;
+@end
+
+@implementation LocationDelegate
+
+- (instancetype)init {
+    if (self = [super init]) {
+        _authSemaphore = dispatch_semaphore_create(0);
+        _isAuthorized = NO;
+        _initGroup = dispatch_group_create();
+    }
+    return self;
+}
+
+- (void)locationManager:(CLLocationManager *)manager didChangeAuthorizationStatus:(CLAuthorizationStatus)status {
+    // Log the authorization status change
+    NSString* statusStr;
+    switch (status) {
+        case kCLAuthorizationStatusAuthorizedAlways:
+            statusStr = @"AuthorizedAlways";
+            break;
+        case kCLAuthorizationStatusDenied:
+            statusStr = @"Denied";
+            break;
+        case kCLAuthorizationStatusRestricted:
+            statusStr = @"Restricted";
+            break;
+        case kCLAuthorizationStatusNotDetermined:
+            statusStr = @"NotDetermined";
+            break;
+        default:
+            statusStr = @"Unknown";
+    }
+    NSLog(@"Location authorization status changed to: %@", statusStr);
+    
+    // Update authorization state
+    self.isAuthorized = (status == kCLAuthorizationStatusAuthorizedAlways);
+    
+    // Signal for any status change
+    dispatch_semaphore_signal(_authSemaphore);
+    dispatch_group_leave(_initGroup);
+}
+
+@end
 
 namespace wificpp {
 
-// Helper to convert CF types to std::string
+// Helper functions
 std::string CFToStdString(CFStringRef cfString) {
     if (!cfString) return "";
     
@@ -33,18 +85,15 @@ std::string CFToStdString(CFStringRef cfString) {
     return "";
 }
 
-// Helper to convert NSString to std::string
 std::string NSStringToStdString(NSString* nsString) {
     if (!nsString) return "";
     return std::string([nsString UTF8String]);
 }
 
-// Helper to convert std::string to CFStringRef
 CFStringRef StdToCFString(const std::string& str) {
     return CFStringCreateWithCString(kCFAllocatorDefault, str.c_str(), kCFStringEncodingUTF8);
 }
 
-// Helper to convert std::string to NSString
 NSString* StdToNSString(const std::string& str) {
     return [NSString stringWithUTF8String:str.c_str()];
 }
@@ -52,179 +101,312 @@ NSString* StdToNSString(const std::string& str) {
 class MacOSWifiImpl : public WifiImpl {
 public:
     MacOSWifiImpl() {
-        // Initialize CoreWLAN interface
-        wifiClient = [CWWiFiClient sharedWiFiClient];
-        if (!wifiClient) {
-            throw std::runtime_error("Failed to initialize CWWiFiClient");
+        // Initialize in an autorelease pool
+        @autoreleasepool {
+            // Initialize AppKit properly
+            if (NSApp == nil) {
+                [NSApplication sharedApplication];
+            }
+            [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+            
+            // Initialize CoreWLAN interface
+            wifiClient = [CWWiFiClient sharedWiFiClient];
+            if (!wifiClient) {
+                throw std::runtime_error("Failed to initialize CWWiFiClient");
+            }
+            
+            wifiInterface = [wifiClient interface];
+            if (!wifiInterface) {
+                throw std::runtime_error("No WiFi interface found");
+            }
+            
+            // Initialize Location Manager on main thread with proper error handling
+            dispatch_sync(dispatch_get_main_queue(), ^{
+                @autoreleasepool {
+                    @try {
+                        locationManager = [[CLLocationManager alloc] init];
+                        if (!locationManager) {
+                            NSLog(@"Failed to create CLLocationManager");
+                            return;
+                        }
+                        
+                        locationDelegate = [[LocationDelegate alloc] init];
+                        if (!locationDelegate) {
+                            NSLog(@"Failed to create LocationDelegate");
+                            return;
+                        }
+                        
+                        locationManager.delegate = locationDelegate;
+                        
+                        // Check initial authorization status
+                        CLAuthorizationStatus status;
+                        if (@available(macOS 11.0, *)) {
+                            status = locationManager.authorizationStatus;
+                        } else {
+                            status = [CLLocationManager authorizationStatus];
+                        }
+                        
+                        // Log initial status
+                        switch (status) {
+                            case kCLAuthorizationStatusNotDetermined:
+                                NSLog(@"Location Services authorization status: Not Determined");
+                                break;
+                            case kCLAuthorizationStatusRestricted:
+                                NSLog(@"Location Services authorization status: Restricted");
+                                break;
+                            case kCLAuthorizationStatusDenied:
+                                NSLog(@"Location Services authorization status: Denied");
+                                break;
+                            case kCLAuthorizationStatusAuthorizedAlways:
+                                NSLog(@"Location Services authorization status: Authorized Always");
+                                break;
+                            default:
+                                NSLog(@"Location Services authorization status: Unknown");
+                                break;
+                        }
+                    } @catch (NSException *exception) {
+                        NSLog(@"Exception during Location Services initialization: %@", exception);
+                    }
+                }
+            });
+            
+            // Get interface name
+            interfaceName = NSStringToStdString([wifiInterface interfaceName]);
+            Logger::getInstance().info("WifiManager initialized on macOS platform with interface " + interfaceName);
         }
-        
-        // Get the default WiFi interface
-        wifiInterface = [wifiClient interface];
-        if (!wifiInterface) {
-            throw std::runtime_error("No WiFi interface found");
+    }
+    
+    ~MacOSWifiImpl() {
+        @autoreleasepool {
+            if (locationManager) {
+                // Clean up location manager on main thread
+                dispatch_sync(dispatch_get_main_queue(), ^{
+                    @autoreleasepool {
+                        locationManager.delegate = nil;
+                        locationDelegate = nil;
+                        locationManager = nil;
+                    }
+                });
+            }
+            
+            // Clean up interface and client
+            wifiInterface = nil;
+            wifiClient = nil;
         }
-        
-        interfaceName = NSStringToStdString([wifiInterface interfaceName]);
-        Logger::getInstance().info("WifiManager initialized on macOS platform with interface " + interfaceName);
     }
-      ~MacOSWifiImpl() {
-        // CoreFoundation objects are reference counted and will be released automatically
-    }
-      std::vector<NetworkInfo> scan() override {
+    
+    std::vector<NetworkInfo> scan() override {
         std::vector<NetworkInfo> networks;
         Logger::getInstance().info("Scanning for networks on macOS interface " + interfaceName);
-        Logger::getInstance().info("Note: On macOS, network SSID and BSSID information may be limited unless Location Services is enabled and authorized");
-        
-        NSError* error = nil;
-        NSSet<CWNetwork*>* scanResults = [wifiInterface scanForNetworksWithName:nil error:&error];
-        
-        if (error || !scanResults) {
-            Logger::getInstance().error("Failed to scan for networks: " + 
-                                       (error ? NSStringToStdString([error localizedDescription]) : "Unknown error"));
-            return networks;
-        }
-          // Convert scan results to NetworkInfo objects
-        for (CWNetwork* network in scanResults) {
-            NetworkInfo info;
-            
-            // Get SSID - may be nil if Location Services is not enabled/authorized
-            NSString* ssidValue = [network ssid];
-            info.ssid = ssidValue ? NSStringToStdString(ssidValue) : "[Hidden Network]";
-            
-            // Get BSSID - may be nil if Location Services is not enabled/authorized
-            NSString* bssidValue = [network bssid];
-            info.bssid = bssidValue ? NSStringToStdString(bssidValue) : "[No Access]";
-            
-            // Get signal strength
-            info.signalStrength = static_cast<int>([network rssiValue]);
-            
-            // Get channel and frequency
-            CWChannel* channel = [network wlanChannel];
-            if (channel) {
-                info.channel = static_cast<int>([channel channelNumber]);
+
+        // Ensure we're running with proper autorelease pool
+        @autoreleasepool {
+            // Check WiFi state first
+            if (![wifiInterface powerOn]) {
+                Logger::getInstance().error("WiFi is disabled. Please enable WiFi in System Settings.");
+                return networks;
+            }
+
+            // Ensure Location Services are authorized
+            if (!locationDelegate.isAuthorized) {
+                Logger::getInstance().info("Requesting Location Services authorization...");
                 
-                // In macOS, you get the band (which indicates frequency range)
-                if ([channel channelBand] == kCWChannelBand2GHz) {
-                    // Calculate approximate frequency for 2.4GHz band
-                    info.frequency = 2412 + ((info.channel - 1) * 5);
-                } else if ([channel channelBand] == kCWChannelBand5GHz) {
-                    // Calculate approximate frequency for 5GHz band
-                    info.frequency = 5170 + ((info.channel - 34) * 5);
-                }            }
-            
-            // Get security type
-            CWSecurity securityType = kCWSecurityUnknown;
-            
-            // Check if network supports different security types
-            if ([network supportsSecurity:kCWSecurityNone]) {
-                securityType = kCWSecurityNone;
-            } else if ([network supportsSecurity:kCWSecurityWEP]) {
-                securityType = kCWSecurityWEP;
-            } else if ([network supportsSecurity:kCWSecurityWPA2Personal]) {
-                securityType = kCWSecurityWPA2Personal;
-            } else if ([network supportsSecurity:kCWSecurityWPAPersonal]) {
-                securityType = kCWSecurityWPAPersonal;
+                // Request authorization synchronously on main thread
+                dispatch_sync(dispatch_get_main_queue(), ^{
+                    @autoreleasepool {
+                        [NSApp activateIgnoringOtherApps:YES];
+                        requestLocationServicesAuthorization();
+                    }
+                });
+                
+                if (locationDelegate.isAuthorized) {
+                    Logger::getInstance().info("Location Services authorization granted");
+                    // Small delay to let system process the authorization
+                    [NSThread sleepForTimeInterval:1.0];
+                } else {
+                    Logger::getInstance().warning("Location Services authorization not granted. Network names may be limited.");
+                }
             }
+
+            // Attempt scanning with exponential backoff
+            NSError* error = nil;
+            NSSet<CWNetwork*>* scanResults = nil;
+            int maxRetries = 5;
+            double baseDelay = 0.5; // Start with 0.5 second delay
             
-            switch (securityType) {
-                case kCWSecurityNone:
+            for (int i = 0; i < maxRetries; i++) {
+                @autoreleasepool {
+                    // Check if a scan is already in progress
+                    NSError* scanError = nil;
+                    [wifiInterface scanForNetworksWithSSID:nil error:&scanError];
+                    if (scanError && [scanError.domain isEqualToString:CWErrorDomain] && 
+                        [scanError.localizedDescription containsString:@"busy"]) {
+                        Logger::getInstance().info("A scan is already in progress, waiting...");
+                        [NSThread sleepForTimeInterval:baseDelay * pow(2, i)];
+                        continue;
+                    }
+                    
+                    // Ensure we have a clean error object for each attempt
+                    error = nil;
+                    scanResults = nil;
+                    
+                    // Perform the scan synchronously since it's already in its own autorelease pool
+                    NSDate* scanStartTime = [NSDate date];
+                    scanResults = [wifiInterface scanForNetworksWithName:nil error:&error];
+                    
+                    // Log scan duration for debugging
+                    NSTimeInterval scanDuration = -[scanStartTime timeIntervalSinceNow];
+                    Logger::getInstance().info("Scan completed in " + std::to_string(scanDuration) + " seconds");
+                    
+                    if (error || !scanResults) {
+                        NSString* errorStr = error ? [error localizedDescription] : @"Unknown error";
+                        Logger::getInstance().error("Failed to scan for networks (attempt " + std::to_string(i+1) + "): " + 
+                                                 NSStringToStdString(errorStr));
+                        
+                        // Handle specific error cases
+                        if ([error.domain isEqualToString:CWErrorDomain]) {
+                            if (error.code == kCWOperationNotPermittedErr) {
+                                Logger::getInstance().error("WiFi scanning requires admin privileges or proper entitlements");
+                                return networks;
+                            }
+                        }
+                        
+                        if (i < maxRetries - 1) continue;
+                        return networks;
+                    }
+
+                    // Check for valid results
+                    if (!scanResults || [scanResults count] == 0) {
+                        Logger::getInstance().info("No networks found in scan");
+                        if (i < maxRetries - 1) continue;
+                        return networks;
+                    }
+
+                    // Verify we have network names
+                    bool hasValidResults = false;
+                    for (CWNetwork* network in scanResults) {
+                        if ([network ssid]) {
+                            hasValidResults = true;
+                            break;
+                        }
+                    }
+
+                    if (hasValidResults) {
+                        Logger::getInstance().info("Successfully retrieved network names");
+                        break;
+                    } else if (i < maxRetries - 1) {
+                        Logger::getInstance().info("No network names available yet, will retry...");
+                        continue;
+                    }
+                }
+            }
+
+            // Process scan results
+            for (CWNetwork* network in scanResults) {
+                NetworkInfo info;
+                
+                // Get SSID
+                NSString* ssidValue = [network ssid];
+                info.ssid = ssidValue ? NSStringToStdString(ssidValue) : "[Hidden Network]";
+                
+                // Get BSSID
+                NSString* bssidValue = [network bssid];
+                info.bssid = bssidValue ? NSStringToStdString(bssidValue) : "[No Access]";
+                
+                // Get signal strength
+                info.signalStrength = static_cast<int>([network rssiValue]);
+                
+                // Get channel and frequency
+                CWChannel* channel = [network wlanChannel];
+                if (channel) {
+                    info.channel = static_cast<int>([channel channelNumber]);
+                    
+                    if ([channel channelBand] == kCWChannelBand2GHz) {
+                        info.frequency = 2412 + ((info.channel - 1) * 5);
+                    } else if ([channel channelBand] == kCWChannelBand5GHz) {
+                        info.frequency = 5170 + ((info.channel - 34) * 5);
+                    }
+                }
+                
+                // Get security type
+                info.security = SecurityType::UNKNOWN;
+                if ([network supportsSecurity:kCWSecurityNone]) {
                     info.security = SecurityType::NONE;
-                    break;
-                case kCWSecurityWEP:
+                } else if ([network supportsSecurity:kCWSecurityWEP]) {
                     info.security = SecurityType::WEP;
-                    break;
-                case kCWSecurityWPAPersonal:
-                    info.security = SecurityType::WPA;
-                    break;
-                case kCWSecurityWPA2Personal:
-                case kCWSecurityWPA2Enterprise:
+                } else if ([network supportsSecurity:kCWSecurityWPA2Personal] ||
+                         [network supportsSecurity:kCWSecurityWPA2Enterprise]) {
                     info.security = SecurityType::WPA2;
-                    break;
-                default:
-                    info.security = SecurityType::UNKNOWN;
+                } else if ([network supportsSecurity:kCWSecurityWPAPersonal] ||
+                         [network supportsSecurity:kCWSecurityWPAEnterprise]) {
+                    info.security = SecurityType::WPA;
+                }
+                
+                networks.push_back(info);
             }
-            
-            networks.push_back(info);
         }
         
         Logger::getInstance().info("Found " + std::to_string(networks.size()) + " networks");
         return networks;
-    }    bool connect(const std::string& ssid, const std::string& password) override {
+    }
+    
+    bool connect(const std::string& ssid, const std::string& password) override {
         Logger::getInstance().info("Connecting to network: " + ssid);
         
         NSError* error = nil;
         NSString* nsSsid = StdToNSString(ssid);
         NSString* nsPassword = password.empty() ? nil : StdToNSString(password);
         
-        // First scan for the network
         NSSet<CWNetwork*>* scanResults = [wifiInterface scanForNetworksWithName:nsSsid error:&error];
         
         if (error || !scanResults || [scanResults count] == 0) {
             Logger::getInstance().error("Failed to find network: " + 
-                                      (error ? NSStringToStdString([error localizedDescription]) : "Network not found"));
+                                     (error ? NSStringToStdString([error localizedDescription]) : "Network not found"));
             return false;
         }
         
-        // Get the first network from scan results
         CWNetwork* network = [scanResults anyObject];
-        
-        // Attempt to connect to the network
         BOOL success = [wifiInterface associateToNetwork:network password:nsPassword error:&error];
         
         if (!success) {
             Logger::getInstance().error("Failed to connect to network: " + 
-                                      (error ? NSStringToStdString([error localizedDescription]) : "Unknown error"));
+                                     (error ? NSStringToStdString([error localizedDescription]) : "Unknown error"));
             return false;
         }
         
-        // Wait for connection to establish
         sleep(2);
-        
-        // Verify connection
         return getStatus() == ConnectionStatus::CONNECTED;
-    }bool disconnect() override {
+    }
+    
+    bool disconnect() override {
         Logger::getInstance().info("Disconnecting from network");
         
-        NSError* error = nil;
         [wifiInterface disassociate];
-        
-        // Since disassociate doesn't return a bool, we verify by checking status
-        // Wait briefly for the operation to complete
         sleep(1);
         
-        if (getStatus() != ConnectionStatus::DISCONNECTED) {
-            Logger::getInstance().error("Failed to disconnect: " + 
-                                       (error ? NSStringToStdString([error localizedDescription]) : "Unknown error"));
-            return false;
-        }
-        
-        return true;
+        return getStatus() == ConnectionStatus::DISCONNECTED;
     }
-      ConnectionStatus getStatus() const override {
-        // Check if WiFi is powered on
+    
+    ConnectionStatus getStatus() const override {
         if (![wifiInterface powerOn]) {
             return ConnectionStatus::DISCONNECTED;
         }
         
-        // Check for current network SSID
         NSString* currentSsid = [wifiInterface ssid];
         if (!currentSsid) {
             return ConnectionStatus::DISCONNECTED;
         }
         
-        // Check if we have an IP address
         if (!hasIpAddress(interfaceName)) {
             return ConnectionStatus::CONNECTING;
         }
         
         return ConnectionStatus::CONNECTED;
-    }bool createHotspot(const std::string& ssid, const std::string& password) override {
+    }
+    
+    bool createHotspot(const std::string& ssid, const std::string& password) override {
         Logger::getInstance().warning("Hotspot creation not yet implemented on macOS");
         return false;
-        
-        // Note: macOS does have a programmatic way to create hotspots using the CWMutableConfiguration
-        // class and applying it with CWInterface's startIBSSModeWithConfiguration method,
-        // but it requires elevated privileges and is more complex than this example shows
     }
     
     bool stopHotspot() override {
@@ -233,11 +415,10 @@ public:
     }
     
     bool isHotspotActive() const override {
-        return false;  // Not implemented yet
+        return false;
     }
     
     bool isHotspotSupported() const override {
-        // macOS does support hotspots (called "Computer to Computer networks" in macOS)
         return true;
     }
     
@@ -245,16 +426,97 @@ private:
     CWWiFiClient* wifiClient = nullptr;
     CWInterface* wifiInterface = nullptr;
     std::string interfaceName;
+    CLLocationManager* locationManager = nullptr;
+    LocationDelegate* locationDelegate = nullptr;
     
-    // Helper method to check if Location Services is enabled and authorized
-    // Note: This requires importing CoreLocation framework for a complete implementation
+    bool requestLocationServicesAuthorization() {
+        // Must be called on main thread
+        if (![NSThread isMainThread]) {
+            __block bool result = false;
+            dispatch_sync(dispatch_get_main_queue(), ^{
+                result = requestLocationServicesAuthorization();
+            });
+            return result;
+        }
+        
+        @autoreleasepool {
+            // First check if Location Services is enabled system-wide
+            if (![CLLocationManager locationServicesEnabled]) {
+                Logger::getInstance().warning("Location Services is disabled in System Settings.\n"
+                                           "Please enable Location Services in System Settings > "
+                                           "Privacy & Security > Location Services");
+                return false;
+            }
+
+            // Ensure NSApplication is ready for UI
+            [NSApp activateIgnoringOtherApps:YES];
+
+            // Check current authorization status using correct API based on OS version
+            CLAuthorizationStatus currentStatus;
+            if (@available(macOS 11.0, *)) {
+                currentStatus = locationManager.authorizationStatus;
+            } else {
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+                currentStatus = [CLLocationManager authorizationStatus];
+                #pragma clang diagnostic pop
+            }
+
+            // If already authorized, return success
+            if (currentStatus == kCLAuthorizationStatusAuthorizedAlways) {
+                locationDelegate.isAuthorized = YES;
+                return true;
+            }
+
+            // Reset authorization state
+            locationDelegate.authSemaphore = dispatch_semaphore_create(0);
+            locationDelegate.isAuthorized = NO;
+
+            // Create dispatch group for coordination
+            dispatch_group_t group = locationDelegate.initGroup;
+            dispatch_group_enter(group);
+
+            // Request authorization with UI focus
+            [locationManager requestAlwaysAuthorization];
+
+            // Wait for response with a timeout
+            dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC);
+            long result = dispatch_group_wait(group, timeout);
+            
+            if (result != 0) {
+                Logger::getInstance().warning("Timeout waiting for Location Services authorization response");
+            } else {
+                Logger::getInstance().info("Received Location Services authorization response");
+            }
+
+            // Check final authorization state
+            if (!locationDelegate.isAuthorized) {
+                Logger::getInstance().warning("Location Services authorization was denied");
+                return false;
+            }
+
+            Logger::getInstance().info("Location Services authorization granted");
+            return true;
+        }
+    }
+
     bool isLocationServicesAuthorized() const {
-        // This is a placeholder - real implementation would use CoreLocation
-        // and check CLAuthorizationStatus
-        return false;
+        if (![CLLocationManager locationServicesEnabled]) {
+            return false;
+        }
+
+        CLAuthorizationStatus status;
+        if (@available(macOS 11.0, *)) {
+            status = locationManager.authorizationStatus;
+        } else {
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            status = [CLLocationManager authorizationStatus];
+            #pragma clang diagnostic pop
+        }
+        return (status == kCLAuthorizationStatusAuthorizedAlways);
     }
     
-    // Helper method to check if an interface has an IP address
     bool hasIpAddress(const std::string& interface_name) const {
         struct ifaddrs* ifaddr;
         if (getifaddrs(&ifaddr) == -1) {
@@ -277,7 +539,6 @@ private:
     }
 };
 
-// Factory function implementation for macOS
 std::unique_ptr<WifiImpl> createPlatformImpl() {
     return std::make_unique<MacOSWifiImpl>();
 }

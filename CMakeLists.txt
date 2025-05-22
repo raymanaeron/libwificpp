@@ -62,12 +62,16 @@ elseif(APPLE)
     find_library(CORE_WLAN_FRAMEWORK CoreWLAN REQUIRED)
     find_library(SYSTEM_CONFIGURATION_FRAMEWORK SystemConfiguration REQUIRED)
     find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
+    find_library(CORE_LOCATION_FRAMEWORK CoreLocation REQUIRED)
+    find_library(APPKIT_FRAMEWORK AppKit REQUIRED)
     
     target_link_libraries(wificpp
         ${CORE_FOUNDATION_FRAMEWORK}
         ${CORE_WLAN_FRAMEWORK}
         ${SYSTEM_CONFIGURATION_FRAMEWORK}
         ${FOUNDATION_FRAMEWORK}
+        ${CORE_LOCATION_FRAMEWORK}
+        ${APPKIT_FRAMEWORK}
     )
     
     # Set Objective-C++ as the language for macOS implementation
@@ -79,6 +83,13 @@ endif()
 # Test executable
 add_executable(test_wifi test/test_wifi.cpp)
 target_link_libraries(test_wifi PRIVATE wificpp)
+
+if(APPLE)
+    # Set Objective-C++ for both macOS implementation and test file
+    set_source_files_properties(src/wifi_macos.cpp test/test_wifi.cpp PROPERTIES
+        COMPILE_FLAGS "-x objective-c++"
+    )
+endif()
 
 # Install rules
 install(TARGETS wificpp

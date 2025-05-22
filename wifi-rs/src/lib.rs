@@ -82,14 +82,20 @@ impl WiFi {
             
             let raw_slice = std::slice::from_raw_parts(raw_networks, count as usize);
             let result = raw_slice
-                .iter()
-                .map(|raw| {                    let ssid = if raw.ssid.is_null() {
+                .iter()                .map(|raw| {
+                    let ssid = if raw.ssid.is_null() {
                         "[Hidden Network]".to_string()
                     } else {
                         let s = std::ffi::CStr::from_ptr(raw.ssid)
                             .to_string_lossy()
                             .into_owned();
-                        if s.is_empty() { "[Hidden Network]".to_string() } else { s }
+                        if s.is_empty() { 
+                            "[Hidden Network]".to_string() 
+                        } else if s.contains("Enable Location Services") {
+                            "[Hidden Network]".to_string()
+                        } else { 
+                            s 
+                        }
                     };
                     
                     let bssid = if raw.bssid.is_null() {
@@ -98,7 +104,13 @@ impl WiFi {
                         let s = std::ffi::CStr::from_ptr(raw.bssid)
                             .to_string_lossy()
                             .into_owned();
-                        if s.is_empty() { "[No Access]".to_string() } else { s }
+                        if s.is_empty() { 
+                            "[No Access]".to_string() 
+                        } else if s.contains("Enable Location Services") {
+                            "[No Access]".to_string()
+                        } else { 
+                            s 
+                        }
                     };
                     
                     NetworkInfo {
