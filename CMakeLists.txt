@@ -13,6 +13,9 @@ if(WIN32)
 elseif(UNIX AND NOT APPLE)
     list(APPEND PLATFORM_SOURCES src/wifi_linux.cpp)
     add_compile_definitions(WIFICPP_PLATFORM_LINUX)
+elseif(APPLE)
+    list(APPEND PLATFORM_SOURCES src/wifi_macos.cpp)
+    add_compile_definitions(WIFICPP_PLATFORM_MACOS)
 else()
     message(FATAL_ERROR "Unsupported platform")
 endif()
@@ -52,6 +55,22 @@ elseif(UNIX AND NOT APPLE)
     target_compile_options(wificpp PRIVATE 
         ${LIBNM_CFLAGS}
         ${GLIB_CFLAGS}
+    )
+elseif(APPLE)
+    # Link with required macOS frameworks
+    find_library(CORE_FOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
+    find_library(CORE_WLAN_FRAMEWORK CoreWLAN REQUIRED)
+    find_library(SYSTEM_CONFIGURATION_FRAMEWORK SystemConfiguration REQUIRED)
+    
+    target_link_libraries(wificpp
+        ${CORE_FOUNDATION_FRAMEWORK}
+        ${CORE_WLAN_FRAMEWORK}
+        ${SYSTEM_CONFIGURATION_FRAMEWORK}
+    )
+    
+    # Set Objective-C++ as the language for macOS implementation
+    set_source_files_properties(src/wifi_macos.cpp PROPERTIES
+        COMPILE_FLAGS "-x objective-c++"
     )
 endif()
 
