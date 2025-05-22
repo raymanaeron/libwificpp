@@ -4,7 +4,12 @@
 #if defined(_WIN32) || defined(_WIN64) || defined(__WIN32__) || defined(__WINDOWS__)
     #define WIFICPP_PLATFORM_WINDOWS
 #elif defined(__APPLE__) && defined(__MACH__)
-    #define WIFICPP_PLATFORM_MACOS
+    #include <TargetConditionals.h>
+    #if TARGET_OS_IPHONE
+        #define WIFICPP_PLATFORM_IOS
+    #else
+        #define WIFICPP_PLATFORM_MACOS
+    #endif
 #elif defined(__ANDROID__)
     #define WIFICPP_PLATFORM_ANDROID
 #elif defined(__linux__) || defined(__gnu_linux__)
