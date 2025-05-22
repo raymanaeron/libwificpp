@@ -23,9 +23,8 @@ public:
     bool connect(const std::string& ssid, const std::string& password = "");
     bool disconnect();
     ConnectionStatus getStatus() const;
-    
-    // Hotspot management
-    bool createHotspot(const std::string& ssid);
+      // Hotspot management
+    bool createHotspot(const std::string& ssid, const std::string& password = "");
     bool stopHotspot();
     bool isHotspotActive() const;
     bool isHotspotSupported() const;

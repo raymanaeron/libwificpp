@@ -61,11 +61,13 @@ elseif(APPLE)
     find_library(CORE_FOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
     find_library(CORE_WLAN_FRAMEWORK CoreWLAN REQUIRED)
     find_library(SYSTEM_CONFIGURATION_FRAMEWORK SystemConfiguration REQUIRED)
+    find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
     
     target_link_libraries(wificpp
         ${CORE_FOUNDATION_FRAMEWORK}
         ${CORE_WLAN_FRAMEWORK}
         ${SYSTEM_CONFIGURATION_FRAMEWORK}
+        ${FOUNDATION_FRAMEWORK}
     )
     
     # Set Objective-C++ as the language for macOS implementation

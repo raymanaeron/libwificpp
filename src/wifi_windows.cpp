@@ -338,10 +338,8 @@ public:
             default:
                 return ConnectionStatus::CONNECTION_ERROR;
         }
-    }
-
-    // Hotspot functionality - simplified implementation for now
-    bool createHotspot(const std::string& ssid) override {
+    }    // Hotspot functionality - simplified implementation for now
+    bool createHotspot(const std::string& ssid, const std::string& password) override {
         Logger::getInstance().warning("Hotspot creation is not yet supported on Windows platform");
         return false;
     }

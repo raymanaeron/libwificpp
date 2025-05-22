@@ -18,9 +18,8 @@ public:
     virtual bool connect(const std::string& ssid, const std::string& password) = 0;
     virtual bool disconnect() = 0;
     virtual ConnectionStatus getStatus() const = 0;
-    
-    // Hotspot operations
-    virtual bool createHotspot(const std::string& ssid) = 0;
+      // Hotspot operations
+    virtual bool createHotspot(const std::string& ssid, const std::string& password) = 0;
     virtual bool stopHotspot() = 0;
     virtual bool isHotspotActive() const = 0;
     virtual bool isHotspotSupported() const = 0;

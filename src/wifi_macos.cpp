@@ -33,31 +33,41 @@ std::string CFToStdString(CFStringRef cfString) {
     return "";
 }
 
+// Helper to convert NSString to std::string
+std::string NSStringToStdString(NSString* nsString) {
+    if (!nsString) return "";
+    return std::string([nsString UTF8String]);
+}
+
 // Helper to convert std::string to CFStringRef
 CFStringRef StdToCFString(const std::string& str) {
     return CFStringCreateWithCString(kCFAllocatorDefault, str.c_str(), kCFStringEncodingUTF8);
+}
+
+// Helper to convert std::string to NSString
+NSString* StdToNSString(const std::string& str) {
+    return [NSString stringWithUTF8String:str.c_str()];
 }
 
 class MacOSWifiImpl : public WifiImpl {
 public:
     MacOSWifiImpl() {
         // Initialize CoreWLAN interface
-        wifiClient = CWWiFiClient::sharedWiFiClient();
+        wifiClient = [CWWiFiClient sharedWiFiClient];
         if (!wifiClient) {
             throw std::runtime_error("Failed to initialize CWWiFiClient");
         }
         
         // Get the default WiFi interface
-        wifiInterface = wifiClient->interface();
+        wifiInterface = [wifiClient interface];
         if (!wifiInterface) {
             throw std::runtime_error("No WiFi interface found");
         }
         
-        interfaceName = CFToStdString(wifiInterface->interfaceName());
+        interfaceName = NSStringToStdString([wifiInterface interfaceName]);
         Logger::getInstance().info("WifiManager initialized on macOS platform with interface " + interfaceName);
     }
-    
-    ~MacOSWifiImpl() {
+      ~MacOSWifiImpl() {
         // CoreFoundation objects are reference counted and will be released automatically
     }
     
@@ -66,11 +76,11 @@ public:
         Logger::getInstance().info("Scanning for networks on macOS interface " + interfaceName);
         
         NSError* error = nil;
-        NSArray* scanResults = wifiInterface->scanForNetworksWithName(nil, error);
+        NSSet<CWNetwork*>* scanResults = [wifiInterface scanForNetworksWithName:nil error:&error];
         
         if (error || !scanResults) {
             Logger::getInstance().error("Failed to scan for networks: " + 
-                                       (error ? CFToStdString(error->localizedDescription()) : "Unknown error"));
+                                       (error ? NSStringToStdString([error localizedDescription]) : "Unknown error"));
             return networks;
         }
         
@@ -79,31 +89,43 @@ public:
             NetworkInfo info;
             
             // Get SSID
-            info.ssid = CFToStdString(network->ssid());
+            info.ssid = NSStringToStdString([network ssid]);
             
             // Get BSSID
-            info.bssid = CFToStdString(network->bssid());
+            info.bssid = NSStringToStdString([network bssid]);
             
             // Get signal strength
-            info.signalStrength = static_cast<int>(network->rssiValue());
+            info.signalStrength = static_cast<int>([network rssiValue]);
             
             // Get channel and frequency
-            CWChannel* channel = network->wlanChannel();
+            CWChannel* channel = [network wlanChannel];
             if (channel) {
-                info.channel = static_cast<int>(channel->channelNumber());
+                info.channel = static_cast<int>([channel channelNumber]);
                 
                 // In macOS, you get the band (which indicates frequency range)
-                if (channel->channelBand() == kCWChannelBand2GHz) {
+                if ([channel channelBand] == kCWChannelBand2GHz) {
                     // Calculate approximate frequency for 2.4GHz band
                     info.frequency = 2412 + ((info.channel - 1) * 5);
-                } else if (channel->channelBand() == kCWChannelBand5GHz) {
+                } else if ([channel channelBand] == kCWChannelBand5GHz) {
                     // Calculate approximate frequency for 5GHz band
                     info.frequency = 5170 + ((info.channel - 34) * 5);
-                }
-            }
+                }            }
             
             // Get security type
-            switch (network->security()) {
+            CWSecurity securityType = kCWSecurityUnknown;
+            
+            // Check if network supports different security types
+            if ([network supportsSecurity:kCWSecurityNone]) {
+                securityType = kCWSecurityNone;
+            } else if ([network supportsSecurity:kCWSecurityWEP]) {
+                securityType = kCWSecurityWEP;
+            } else if ([network supportsSecurity:kCWSecurityWPA2Personal]) {
+                securityType = kCWSecurityWPA2Personal;
+            } else if ([network supportsSecurity:kCWSecurityWPAPersonal]) {
+                securityType = kCWSecurityWPAPersonal;
+            }
+            
+            switch (securityType) {
                 case kCWSecurityNone:
                     info.security = SecurityType::NONE;
                     break;
@@ -126,37 +148,31 @@ public:
         
         Logger::getInstance().info("Found " + std::to_string(networks.size()) + " networks");
         return networks;
-    }
-    
-    bool connect(const std::string& ssid, const std::string& password) override {
+    }    bool connect(const std::string& ssid, const std::string& password) override {
         Logger::getInstance().info("Connecting to network: " + ssid);
         
         NSError* error = nil;
-        CFStringRef cfSsid = StdToCFString(ssid);
-        CFStringRef cfPassword = StdToCFString(password);
+        NSString* nsSsid = StdToNSString(ssid);
+        NSString* nsPassword = password.empty() ? nil : StdToNSString(password);
         
-        bool success = false;
-        if (password.empty()) {
-            // Connect to open network
-            success = wifiInterface->associateToNetwork(
-                CWNetwork::networkWithSSID(cfSsid, error),
-                error
-            );
-        } else {
-            // Create a password entry in keychain
-            success = wifiInterface->associateToNetwork(
-                CWNetwork::networkWithSSID(cfSsid, error),
-                cfPassword,
-                error
-            );
+        // First scan for the network
+        NSSet<CWNetwork*>* scanResults = [wifiInterface scanForNetworksWithName:nsSsid error:&error];
+        
+        if (error || !scanResults || [scanResults count] == 0) {
+            Logger::getInstance().error("Failed to find network: " + 
+                                      (error ? NSStringToStdString([error localizedDescription]) : "Network not found"));
+            return false;
         }
         
-        CFRelease(cfSsid);
-        CFRelease(cfPassword);
+        // Get the first network from scan results
+        CWNetwork* network = [scanResults anyObject];
+        
+        // Attempt to connect to the network
+        BOOL success = [wifiInterface associateToNetwork:network password:nsPassword error:&error];
         
         if (!success) {
             Logger::getInstance().error("Failed to connect to network: " + 
-                                       (error ? CFToStdString(error->localizedDescription()) : "Unknown error"));
+                                      (error ? NSStringToStdString([error localizedDescription]) : "Unknown error"));
             return false;
         }
         
@@ -165,32 +181,33 @@ public:
         
         // Verify connection
         return getStatus() == ConnectionStatus::CONNECTED;
-    }
-    
-    bool disconnect() override {
+    }bool disconnect() override {
         Logger::getInstance().info("Disconnecting from network");
         
         NSError* error = nil;
-        bool success = wifiInterface->disassociate();
+        [wifiInterface disassociate];
         
-        if (!success) {
+        // Since disassociate doesn't return a bool, we verify by checking status
+        // Wait briefly for the operation to complete
+        sleep(1);
+        
+        if (getStatus() != ConnectionStatus::DISCONNECTED) {
             Logger::getInstance().error("Failed to disconnect: " + 
-                                       (error ? CFToStdString(error->localizedDescription()) : "Unknown error"));
+                                       (error ? NSStringToStdString([error localizedDescription]) : "Unknown error"));
             return false;
         }
         
         return true;
     }
-    
-    ConnectionStatus getStatus() const override {
+      ConnectionStatus getStatus() const override {
         // Check if WiFi is powered on
-        if (!wifiInterface->powerOn()) {
+        if (![wifiInterface powerOn]) {
             return ConnectionStatus::DISCONNECTED;
         }
         
-        // Check for current network
-        CWNetwork* currentNetwork = wifiInterface->currentNetwork();
-        if (!currentNetwork) {
+        // Check for current network SSID
+        NSString* currentSsid = [wifiInterface ssid];
+        if (!currentSsid) {
             return ConnectionStatus::DISCONNECTED;
         }
         
@@ -200,9 +217,7 @@ public:
         }
         
         return ConnectionStatus::CONNECTED;
-    }
-    
-    bool createHotspot(const std::string& ssid, const std::string& password = "") override {
+    }bool createHotspot(const std::string& ssid, const std::string& password) override {
         Logger::getInstance().warning("Hotspot creation not yet implemented on macOS");
         return false;
         

@@ -1,9 +1,13 @@
 #include "wifi_types.hpp"
 #include "wifi_logger.hpp"
+#include "wifi_platform.hpp"
+
+#ifdef WIFICPP_PLATFORM_WINDOWS
 #include <windows.h>
 #include <wlanapi.h>
 #include <objbase.h>
 #include <wtypes.h>
+#endif
 
 namespace wificpp {
 

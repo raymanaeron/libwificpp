@@ -36,10 +36,8 @@ public:
 
     ConnectionStatus getStatus() const {
         return platformImpl->getStatus();
-    }
-
-    bool createHotspot(const std::string& ssid) {
-        return platformImpl->createHotspot(ssid);
+    }    bool createHotspot(const std::string& ssid, const std::string& password) {
+        return platformImpl->createHotspot(ssid, password);
     }
     
     bool stopHotspot() {
@@ -78,8 +76,8 @@ ConnectionStatus WifiManager::getStatus() const {
     return pimpl->getStatus();
 }
 
-bool WifiManager::createHotspot(const std::string& ssid) {
-    return pimpl->createHotspot(ssid);
+bool WifiManager::createHotspot(const std::string& ssid, const std::string& password) {
+    return pimpl->createHotspot(ssid, password);
 }
 
 bool WifiManager::stopHotspot() {
