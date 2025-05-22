@@ -1,4 +1,4 @@
-use wifi_rs::{WiFi, ConnectionStatus, SecurityType};
+use wifi_rs::{WiFi, SecurityType};
 
 fn main() {
     let wifi = WiFi::new();

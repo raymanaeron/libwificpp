@@ -9,13 +9,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(PLATFORM_SOURCES "")
 if(WIN32)
     list(APPEND PLATFORM_SOURCES src/wifi_windows.cpp)
-    add_compile_definitions(WIFICPP_PLATFORM_WINDOWS)
+    # Removing duplicate definition, already defined in wifi_platform.hpp
 elseif(UNIX AND NOT APPLE)
     list(APPEND PLATFORM_SOURCES src/wifi_linux.cpp)
-    add_compile_definitions(WIFICPP_PLATFORM_LINUX)
+    # Removing duplicate definition, already defined in wifi_platform.hpp
 elseif(APPLE)
     list(APPEND PLATFORM_SOURCES src/wifi_macos.cpp)
-    add_compile_definitions(WIFICPP_PLATFORM_MACOS)
+    # Removing duplicate definition, already defined in wifi_platform.hpp
 else()
     message(FATAL_ERROR "Unsupported platform")
 endif()
