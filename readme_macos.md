@@ -27,7 +27,7 @@
 
 2. **Build and Install libwificpp**
    ```bash
-   git clone https://github.com/yourusername/libwificpp.git
+   git clone https://github.com/raymanaeron/libwificpp.git
    cd libwificpp
    mkdir build && cd build
    cmake ..

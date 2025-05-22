@@ -14,6 +14,18 @@
     #define WIFICPP_PLATFORM_ANDROID
 #elif defined(__linux__) || defined(__gnu_linux__)
     #define WIFICPP_PLATFORM_LINUX
+#elif defined(ESP_PLATFORM) || defined(CONFIG_IDF_TARGET_ESP32)
+    #define WIFICPP_PLATFORM_RTOS
+    #define WIFICPP_ESP32
+#elif defined(CONFIG_ZEPHYR_KERNEL)
+    #define WIFICPP_PLATFORM_RTOS
+    #define WIFICPP_ZEPHYR
+#elif defined(TX_INCLUDE_USER_DEFINE_FILE) || defined(THREADX_MAJOR_VERSION)
+    #define WIFICPP_PLATFORM_RTOS
+    #define WIFICPP_THREADX
+#elif defined(FREERTOS_CONFIG_H) || defined(INC_FREERTOS_H)
+    #define WIFICPP_PLATFORM_RTOS
+    #define WIFICPP_FREERTOS
 #else
     #error "Unsupported platform"
 #endif
@@ -32,6 +44,8 @@ inline bool isSupported() {
     return true;
 #elif defined(WIFICPP_PLATFORM_LINUX)
     return true;
+#elif defined(WIFICPP_PLATFORM_RTOS)
+    return true;
 #else
     return false;
 #endif
@@ -47,6 +61,8 @@ inline const char* getPlatformName() {
     return "Android";
 #elif defined(WIFICPP_PLATFORM_LINUX)
     return "Linux";
+#elif defined(WIFICPP_PLATFORM_RTOS)
+    return "RTOS";
 #else
     return "Unknown";
 #endif
@@ -62,6 +78,8 @@ inline bool requiresElevatedPrivileges() {
     return true;  // Android typically requires elevated privileges for WiFi operations
 #elif defined(WIFICPP_PLATFORM_LINUX)
     return true;  // Linux also typically requires root for managing network interfaces
+#elif defined(WIFICPP_PLATFORM_RTOS)
+    return false; // RTOS platforms generally do not have the same concept of elevated privileges
 #else
     return false;
 #endif
