@@ -1,0 +1,12 @@
+[package]
+name = "wifi-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# For FFI bindings
+libc = "0.2"
+
+[build-dependencies]
+# For building C++ code
+cmake = "0.1"

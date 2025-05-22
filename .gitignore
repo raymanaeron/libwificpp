@@ -1,0 +1,52 @@
+# C++ build artifacts
+/build/
+/bin/
+/out/
+/lib/
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+*.exe
+*.ilk
+*.pdb
+*.exp
+
+# CMake artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+*.cmake
+!CMakeLists.txt
+
+# Rust build artifacts
+/wifi-rs/target/
+/wifi-rs/Cargo.lock
+**/*.rs.bk
+
+# IDE and editor files
+.vscode/
+.idea/
+.vs/
+*.swp
+*.swo
+*~
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Dependency directories
+/deps/
+/vendor/
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
